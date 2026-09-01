@@ -1,0 +1,12 @@
+{
+  "name": "dns-zone-lint",
+  "version": "0.1.0",
+  "description": "Validating parser and pretty printer for DNS zone file records",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js"
+  }
+}
