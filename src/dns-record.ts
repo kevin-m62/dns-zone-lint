@@ -15,7 +15,31 @@ export type DnsRecord =
       preference: number;
       exchange: string;
     }
-  | { name: string; ttl: number; class: "IN"; type: "TXT"; text: string };
+  | { name: string; ttl: number; class: "IN"; type: "TXT"; text: string }
+  | { name: string; ttl: number; class: "IN"; type: "PTR"; target: string }
+  | {
+      name: string;
+      ttl: number;
+      class: "IN";
+      type: "SRV";
+      priority: number;
+      weight: number;
+      port: number;
+      target: string;
+    }
+  | {
+      name: string;
+      ttl: number;
+      class: "IN";
+      type: "SOA";
+      mname: string;
+      rname: string;
+      serial: number;
+      refresh: number;
+      retry: number;
+      expire: number;
+      minimum: number;
+    };
 
 export class DnsParseError extends Error {
   constructor(
@@ -35,7 +59,8 @@ export class AggregateDnsParseError extends Error {
 }
 
 const MAX_TTL = 2147483647; // RFC 2181 4.3: TTL is a signed 32-bit value
-const MAX_PREFERENCE = 65535;
+const MAX_U16 = 65535;
+const MAX_U32 = 4294967295;
 
 export function parseZone(input: string): DnsRecord[] {
   const records: DnsRecord[] = [];
@@ -145,6 +170,54 @@ function parseLine(line: string, lineNumber: number): DnsRecord {
       requireFieldCount(rdata, 1, type, lineNumber);
       return { name, ttl, class: "IN", type: "TXT", text: rdata[0]! };
     }
+    case "PTR": {
+      requireFieldCount(rdata, 1, type, lineNumber);
+      const target = rdata[0]!;
+      if (!isValidHostname(target)) {
+        throw new DnsParseError(lineNumber, `invalid PTR target "${target}"`);
+      }
+      return { name, ttl, class: "IN", type: "PTR", target };
+    }
+    case "SRV": {
+      requireFieldCount(rdata, 4, type, lineNumber);
+      const priority = parseUnsignedInt(rdata[0]!, MAX_U16, "SRV priority", lineNumber);
+      const weight = parseUnsignedInt(rdata[1]!, MAX_U16, "SRV weight", lineNumber);
+      const port = parseUnsignedInt(rdata[2]!, MAX_U16, "SRV port", lineNumber);
+      const target = rdata[3]!;
+      if (!isValidHostname(target)) {
+        throw new DnsParseError(lineNumber, `invalid SRV target "${target}"`);
+      }
+      return { name, ttl, class: "IN", type: "SRV", priority, weight, port, target };
+    }
+    case "SOA": {
+      requireFieldCount(rdata, 7, type, lineNumber);
+      const mname = rdata[0]!;
+      const rname = rdata[1]!;
+      if (!isValidHostname(mname)) {
+        throw new DnsParseError(lineNumber, `invalid SOA mname "${mname}"`);
+      }
+      if (!isValidHostname(rname)) {
+        throw new DnsParseError(lineNumber, `invalid SOA rname "${rname}"`);
+      }
+      const serial = parseUnsignedInt(rdata[2]!, MAX_U32, "SOA serial", lineNumber);
+      const refresh = parseUnsignedInt(rdata[3]!, MAX_U32, "SOA refresh", lineNumber);
+      const retry = parseUnsignedInt(rdata[4]!, MAX_U32, "SOA retry", lineNumber);
+      const expire = parseUnsignedInt(rdata[5]!, MAX_U32, "SOA expire", lineNumber);
+      const minimum = parseUnsignedInt(rdata[6]!, MAX_U32, "SOA minimum", lineNumber);
+      return {
+        name,
+        ttl,
+        class: "IN",
+        type: "SOA",
+        mname,
+        rname,
+        serial,
+        refresh,
+        retry,
+        expire,
+        minimum,
+      };
+    }
     default:
       throw new DnsParseError(lineNumber, `unsupported record type "${type}"`);
   }
@@ -165,34 +238,30 @@ function requireFieldCount(
 }
 
 function parseTtl(text: string, lineNumber: number): number {
-  if (!/^\d+$/.test(text)) {
-    throw new DnsParseError(
-      lineNumber,
-      `invalid TTL "${text}", expected a non-negative integer`,
-    );
-  }
-  const value = Number(text);
-  if (value > MAX_TTL) {
-    throw new DnsParseError(
-      lineNumber,
-      `TTL "${text}" out of range (max ${MAX_TTL})`,
-    );
-  }
-  return value;
+  return parseUnsignedInt(text, MAX_TTL, "TTL", lineNumber);
 }
 
 function parsePreference(text: string, lineNumber: number): number {
+  return parseUnsignedInt(text, MAX_U16, "MX preference", lineNumber);
+}
+
+function parseUnsignedInt(
+  text: string,
+  max: number,
+  label: string,
+  lineNumber: number,
+): number {
   if (!/^\d+$/.test(text)) {
     throw new DnsParseError(
       lineNumber,
-      `invalid MX preference "${text}", expected a non-negative integer`,
+      `invalid ${label} "${text}", expected a non-negative integer`,
     );
   }
   const value = Number(text);
-  if (value > MAX_PREFERENCE) {
+  if (value > max) {
     throw new DnsParseError(
       lineNumber,
-      `MX preference "${text}" out of range (max ${MAX_PREFERENCE})`,
+      `${label} "${text}" out of range (max ${max})`,
     );
   }
   return value;

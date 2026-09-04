@@ -39,6 +39,12 @@ function formatRdata(record: DnsRecord): string {
       return `${record.preference} ${record.exchange}`;
     case "TXT":
       return `"${escapeText(record.text)}"`;
+    case "PTR":
+      return record.target;
+    case "SRV":
+      return `${record.priority} ${record.weight} ${record.port} ${record.target}`;
+    case "SOA":
+      return `${record.mname} ${record.rname} ${record.serial} ${record.refresh} ${record.retry} ${record.expire} ${record.minimum}`;
   }
 }
 

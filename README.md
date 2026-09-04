@@ -12,8 +12,9 @@ it runs standalone against a saved zone file.
 
 ## Supported records
 
-`A`, `AAAA`, `CNAME`, `NS`, `MX`, `TXT`, class `IN` only. Anything else is
-reported as an error rather than silently passed through.
+`A`, `AAAA`, `CNAME`, `NS`, `MX`, `TXT`, `PTR`, `SRV`, `SOA`, class `IN`
+only. Anything else is reported as an error rather than silently passed
+through.
 
 ## Record format
 
@@ -28,6 +29,9 @@ example.com.        3600 IN A     192.0.2.10
 www.example.com.    3600 IN CNAME example.com.
 example.com.        3600 IN MX    10 mail.example.com.
 example.com.        3600 IN TXT   "v=spf1 -all"
+10.2.0.192.in-addr.arpa. 3600 IN PTR example.com.
+_sip._tcp.example.com. 3600 IN SRV 10 60 5060 sip.example.com.
+example.com.        3600 IN SOA   ns1.example.com. hostmaster.example.com. 2026090501 7200 3600 1209600 3600
 ```
 
 `;` starts a comment that runs to the end of the line. Blank lines are
@@ -87,4 +91,5 @@ process.stdout.write(formatZone(records));
 ## Status
 
 Early skeleton. See the record types listed above for what's covered so
-far — SOA, SRV, PTR, and multi-class support are not implemented yet.
+far — there's no test suite yet, no `$ORIGIN`/`$TTL` directive support,
+and only class `IN` is recognized.
