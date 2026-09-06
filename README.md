@@ -64,6 +64,17 @@ Multiple files are concatenated in the order given before parsing, so
 records can be split across files (e.g. one file per record type) and
 still be checked and printed together.
 
+## Testing
+
+Tests use Node's built-in test runner, so there's nothing to install:
+
+```
+npm test
+```
+
+This compiles with `tsc` and then runs everything under `dist` matching
+Node's test file conventions (`*.test.js`).
+
 ## Output
 
 On success, the reformatted, column-aligned records are written to
@@ -91,5 +102,5 @@ process.stdout.write(formatZone(records));
 ## Status
 
 Early skeleton. See the record types listed above for what's covered so
-far — there's no test suite yet, no `$ORIGIN`/`$TTL` directive support,
-and only class `IN` is recognized.
+far — there's no `$ORIGIN`/`$TTL` directive support yet, and only class
+`IN` is recognized.
