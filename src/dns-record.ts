@@ -65,13 +65,24 @@ const MAX_U32 = 4294967295;
 export function parseZone(input: string): DnsRecord[] {
   const records: DnsRecord[] = [];
   const errors: DnsParseError[] = [];
+  // $ORIGIN and $TTL apply to every line after them, in file order, so
+  // they're threaded through the loop rather than resolved per-record.
+  let origin: string | undefined;
+  let defaultTtl: number | undefined;
 
   input.split(/\r\n|\n/).forEach((raw, index) => {
     const line = stripComment(raw).trim();
     if (line.length === 0) return;
+    const lineNumber = index + 1;
 
     try {
-      records.push(parseLine(line, index + 1));
+      if (line.startsWith("$")) {
+        const directive = parseDirective(line, lineNumber, origin);
+        if (directive.origin !== undefined) origin = directive.origin;
+        if (directive.ttl !== undefined) defaultTtl = directive.ttl;
+        return;
+      }
+      records.push(parseLine(line, lineNumber, origin, defaultTtl));
     } catch (err) {
       if (err instanceof DnsParseError) {
         errors.push(err);
@@ -87,7 +98,56 @@ export function parseZone(input: string): DnsRecord[] {
   return records;
 }
 
-function parseLine(line: string, lineNumber: number): DnsRecord {
+// Handles $ORIGIN <domain> and $TTL <seconds>. Both take exactly one
+// argument; anything else is a directive we don't recognize.
+function parseDirective(
+  line: string,
+  lineNumber: number,
+  currentOrigin: string | undefined,
+): { origin?: string; ttl?: number } {
+  const tokens = tokenize(line);
+  const name = tokens[0]!.toUpperCase();
+
+  if (name === "$ORIGIN") {
+    if (tokens.length !== 2) {
+      throw new DnsParseError(
+        lineNumber,
+        `$ORIGIN expects exactly 1 argument, got ${tokens.length - 1}`,
+      );
+    }
+    const arg = tokens[1]!;
+    if (!isValidHostname(arg)) {
+      throw new DnsParseError(lineNumber, `invalid $ORIGIN domain "${arg}"`);
+    }
+    if (arg.endsWith(".")) return { origin: arg };
+    if (currentOrigin === undefined) {
+      throw new DnsParseError(
+        lineNumber,
+        `relative $ORIGIN "${arg}" given but no origin is set yet`,
+      );
+    }
+    return { origin: `${arg}.${currentOrigin}` };
+  }
+
+  if (name === "$TTL") {
+    if (tokens.length !== 2) {
+      throw new DnsParseError(
+        lineNumber,
+        `$TTL expects exactly 1 argument, got ${tokens.length - 1}`,
+      );
+    }
+    return { ttl: parseTtl(tokens[1]!, lineNumber) };
+  }
+
+  throw new DnsParseError(lineNumber, `unsupported directive "${tokens[0]}"`);
+}
+
+function parseLine(
+  line: string,
+  lineNumber: number,
+  origin: string | undefined,
+  defaultTtl: number | undefined,
+): DnsRecord {
   let tokens: string[];
   try {
     tokens = tokenize(line);
@@ -98,25 +158,41 @@ function parseLine(line: string, lineNumber: number): DnsRecord {
     );
   }
 
-  if (tokens.length < 4) {
+  if (tokens.length < 3) {
     throw new DnsParseError(
       lineNumber,
-      `expected at least 4 fields (name ttl class type), got ${tokens.length}`,
+      `expected at least 3 fields (name [ttl] class type), got ${tokens.length}`,
     );
   }
 
-  const [name, ttlText, cls, type, ...rdata] = tokens as [
-    string,
-    string,
-    string,
-    string,
-    ...string[],
-  ];
+  const rawName = tokens[0]!;
+  let cursor = 1;
 
-  if (!isValidHostname(name)) {
-    throw new DnsParseError(lineNumber, `invalid owner name "${name}"`);
+  let ttl: number;
+  const maybeTtl = tokens[cursor]!;
+  if (/^\d+$/.test(maybeTtl)) {
+    ttl = parseTtl(maybeTtl, lineNumber);
+    cursor++;
+  } else if (defaultTtl !== undefined) {
+    ttl = defaultTtl;
+  } else {
+    throw new DnsParseError(
+      lineNumber,
+      "record has no TTL field and no $TTL directive has set a default",
+    );
   }
-  const ttl = parseTtl(ttlText, lineNumber);
+
+  const cls = tokens[cursor];
+  const type = tokens[cursor + 1];
+  if (cls === undefined || type === undefined) {
+    throw new DnsParseError(
+      lineNumber,
+      `expected at least 3 fields (name [ttl] class type), got ${tokens.length}`,
+    );
+  }
+  const rdata = tokens.slice(cursor + 2);
+
+  const name = resolveName(rawName, origin, lineNumber, "owner name");
   if (cls !== "IN") {
     throw new DnsParseError(
       lineNumber,
@@ -143,27 +219,18 @@ function parseLine(line: string, lineNumber: number): DnsRecord {
     }
     case "CNAME": {
       requireFieldCount(rdata, 1, type, lineNumber);
-      const target = rdata[0]!;
-      if (!isValidHostname(target)) {
-        throw new DnsParseError(lineNumber, `invalid CNAME target "${target}"`);
-      }
+      const target = resolveName(rdata[0]!, origin, lineNumber, "CNAME target");
       return { name, ttl, class: "IN", type: "CNAME", target };
     }
     case "NS": {
       requireFieldCount(rdata, 1, type, lineNumber);
-      const target = rdata[0]!;
-      if (!isValidHostname(target)) {
-        throw new DnsParseError(lineNumber, `invalid NS target "${target}"`);
-      }
+      const target = resolveName(rdata[0]!, origin, lineNumber, "NS target");
       return { name, ttl, class: "IN", type: "NS", target };
     }
     case "MX": {
       requireFieldCount(rdata, 2, type, lineNumber);
       const preference = parsePreference(rdata[0]!, lineNumber);
-      const exchange = rdata[1]!;
-      if (!isValidHostname(exchange)) {
-        throw new DnsParseError(lineNumber, `invalid MX exchange "${exchange}"`);
-      }
+      const exchange = resolveName(rdata[1]!, origin, lineNumber, "MX exchange");
       return { name, ttl, class: "IN", type: "MX", preference, exchange };
     }
     case "TXT": {
@@ -172,10 +239,7 @@ function parseLine(line: string, lineNumber: number): DnsRecord {
     }
     case "PTR": {
       requireFieldCount(rdata, 1, type, lineNumber);
-      const target = rdata[0]!;
-      if (!isValidHostname(target)) {
-        throw new DnsParseError(lineNumber, `invalid PTR target "${target}"`);
-      }
+      const target = resolveName(rdata[0]!, origin, lineNumber, "PTR target");
       return { name, ttl, class: "IN", type: "PTR", target };
     }
     case "SRV": {
@@ -183,22 +247,13 @@ function parseLine(line: string, lineNumber: number): DnsRecord {
       const priority = parseUnsignedInt(rdata[0]!, MAX_U16, "SRV priority", lineNumber);
       const weight = parseUnsignedInt(rdata[1]!, MAX_U16, "SRV weight", lineNumber);
       const port = parseUnsignedInt(rdata[2]!, MAX_U16, "SRV port", lineNumber);
-      const target = rdata[3]!;
-      if (!isValidHostname(target)) {
-        throw new DnsParseError(lineNumber, `invalid SRV target "${target}"`);
-      }
+      const target = resolveName(rdata[3]!, origin, lineNumber, "SRV target");
       return { name, ttl, class: "IN", type: "SRV", priority, weight, port, target };
     }
     case "SOA": {
       requireFieldCount(rdata, 7, type, lineNumber);
-      const mname = rdata[0]!;
-      const rname = rdata[1]!;
-      if (!isValidHostname(mname)) {
-        throw new DnsParseError(lineNumber, `invalid SOA mname "${mname}"`);
-      }
-      if (!isValidHostname(rname)) {
-        throw new DnsParseError(lineNumber, `invalid SOA rname "${rname}"`);
-      }
+      const mname = resolveName(rdata[0]!, origin, lineNumber, "SOA mname");
+      const rname = resolveName(rdata[1]!, origin, lineNumber, "SOA rname");
       const serial = parseUnsignedInt(rdata[2]!, MAX_U32, "SOA serial", lineNumber);
       const refresh = parseUnsignedInt(rdata[3]!, MAX_U32, "SOA refresh", lineNumber);
       const retry = parseUnsignedInt(rdata[4]!, MAX_U32, "SOA retry", lineNumber);
@@ -314,6 +369,32 @@ function stripComment(line: string): string {
     }
   }
   return line;
+}
+
+// Qualifies a name against the current $ORIGIN: "@" becomes the origin
+// itself, an already-absolute (dot-terminated) name is left alone, and a
+// bare relative name is appended to the origin. With no origin set, "@"
+// is an error but a relative name is passed through unchanged, matching
+// this tool's pre-$ORIGIN behavior for zones that never declare one.
+function resolveName(
+  raw: string,
+  origin: string | undefined,
+  lineNumber: number,
+  label: string,
+): string {
+  if (raw === "@") {
+    if (origin === undefined) {
+      throw new DnsParseError(lineNumber, `"@" used in ${label} with no $ORIGIN set`);
+    }
+    return origin;
+  }
+  if (!isValidHostname(raw)) {
+    throw new DnsParseError(lineNumber, `invalid ${label} "${raw}"`);
+  }
+  if (raw.endsWith(".") || origin === undefined) {
+    return raw;
+  }
+  return `${raw}.${origin}`;
 }
 
 function isValidHostname(name: string): boolean {

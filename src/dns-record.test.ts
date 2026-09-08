@@ -171,6 +171,95 @@ test("rejects an unterminated quoted TXT string", () => {
   );
 });
 
+test("$ORIGIN qualifies relative owner names and relative rdata names", () => {
+  const zone = `
+$ORIGIN example.com.
+www 3600 IN A     192.0.2.10
+www 3600 IN CNAME mail
+mail 3600 IN A    192.0.2.20
+`;
+  const records = parseZone(zone);
+  assert.equal(records[0]!.name, "www.example.com.");
+  assert.equal(records[1]!.name, "www.example.com.");
+  assert.equal(records[1]!.type, "CNAME");
+  if (records[1]!.type === "CNAME") {
+    assert.equal(records[1]!.target, "mail.example.com.");
+  }
+});
+
+test("@ resolves to the current $ORIGIN", () => {
+  const records = parseZone(`
+$ORIGIN example.com.
+@ 3600 IN A 192.0.2.10
+`);
+  assert.equal(records[0]!.name, "example.com.");
+});
+
+test("an absolute (dot-terminated) name is never qualified, even with $ORIGIN set", () => {
+  const records = parseZone(`
+$ORIGIN example.com.
+www.other.org. 3600 IN A 192.0.2.10
+`);
+  assert.equal(records[0]!.name, "www.other.org.");
+});
+
+test("relative names are left unqualified when no $ORIGIN has been set", () => {
+  const records = parseZone("www 3600 IN CNAME target");
+  assert.equal(records[0]!.name, "www");
+  assert.equal(records[0]!.type, "CNAME");
+  if (records[0]!.type === "CNAME") assert.equal(records[0]!.target, "target");
+});
+
+test("a later $ORIGIN with a relative argument is qualified against the prior origin", () => {
+  const records = parseZone(`
+$ORIGIN example.com.
+$ORIGIN sub
+www 3600 IN A 192.0.2.10
+`);
+  assert.equal(records[0]!.name, "www.sub.example.com.");
+});
+
+test("rejects a relative $ORIGIN argument with no origin set yet", () => {
+  assert.match(
+    firstError("$ORIGIN sub\nwww 3600 IN A 192.0.2.10"),
+    /relative \$ORIGIN "sub" given but no origin is set yet/,
+  );
+});
+
+test("$TTL supplies the default TTL for record lines that omit it", () => {
+  const records = parseZone(`
+$TTL 1800
+example.com. IN A 192.0.2.10
+`);
+  assert.equal(records[0]!.ttl, 1800);
+});
+
+test("an explicit TTL field overrides the $TTL default", () => {
+  const records = parseZone(`
+$TTL 1800
+example.com. 60 IN A 192.0.2.10
+`);
+  assert.equal(records[0]!.ttl, 60);
+});
+
+test("rejects a record with no TTL field when no $TTL directive has been set", () => {
+  assert.match(
+    firstError("example.com. IN A 192.0.2.10"),
+    /record has no TTL field and no \$TTL directive has set a default/,
+  );
+});
+
+test("rejects an unsupported directive", () => {
+  assert.match(
+    firstError("$INCLUDE other.zone"),
+    /unsupported directive "\$INCLUDE"/,
+  );
+});
+
+test("rejects $TTL with the wrong number of arguments", () => {
+  assert.match(firstError("$TTL"), /\$TTL expects exactly 1 argument, got 0/);
+});
+
 test("collects one error per bad line, with correct line numbers, instead of stopping at the first", () => {
   const zone = `example.com. 3600 IN A 999.0.2.10
 www.example.com. 3600 IN A 192.0.2.1

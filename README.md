@@ -37,6 +37,34 @@ example.com.        3600 IN SOA   ns1.example.com. hostmaster.example.com. 20260
 `;` starts a comment that runs to the end of the line. Blank lines are
 ignored.
 
+## Directives
+
+`$ORIGIN` and `$TTL` are recognized, in the usual zone-file sense:
+
+```
+$ORIGIN example.com.
+$TTL 3600
+
+www     IN A     192.0.2.10   ; owner name -> www.example.com.
+@       IN MX 10 mail         ; @ -> example.com., mail -> mail.example.com.
+mail    IN A     192.0.2.20
+```
+
+`$ORIGIN` sets the domain that relative (non-dot-terminated) names are
+qualified against, for both the owner name and any name-valued rdata field
+(CNAME/NS/MX/PTR/SRV targets, SOA mname/rname). `@` stands for the origin
+itself. A name that already ends in `.` is left alone. `$ORIGIN`'s own
+argument may itself be relative to a previously set origin, but the first
+`$ORIGIN` in a zone must be absolute.
+
+`$TTL` sets the default TTL used by any record line that omits its TTL
+field. Once a zone has a `$TTL`, records can drop straight to
+`NAME CLASS TYPE RDATA...`, as in the `www` and `@` lines above.
+
+Neither directive is required. A zone with no `$ORIGIN` behaves as before:
+relative names are kept as-is rather than qualified. A zone with no `$TTL`
+requires every record line to spell out its own TTL.
+
 ## Building and running
 
 There are no dependencies to install. Compile with `tsc` (any recent
@@ -102,5 +130,6 @@ process.stdout.write(formatZone(records));
 ## Status
 
 Early skeleton. See the record types listed above for what's covered so
-far — there's no `$ORIGIN`/`$TTL` directive support yet, and only class
-`IN` is recognized.
+far — only class `IN` is recognized, there's no `--json` or `--check`
+output mode yet, and IPv6 validation doesn't cover embedded IPv4 tails or
+zone indices.
