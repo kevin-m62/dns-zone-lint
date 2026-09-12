@@ -23,6 +23,13 @@ export function formatZone(records: DnsRecord[]): string {
   return lines.join("\n") + "\n";
 }
 
+// Plain JSON.stringify output of the record objects, in the same order
+// they were parsed. Each DnsRecord is already a flat, serializable shape,
+// so there's no intermediate conversion step.
+export function formatZoneJson(records: DnsRecord[]): string {
+  return `${JSON.stringify(records, null, 2)}\n`;
+}
+
 function widestOf(records: DnsRecord[], select: (r: DnsRecord) => string): number {
   return records.reduce((max, r) => Math.max(max, select(r).length), 0);
 }

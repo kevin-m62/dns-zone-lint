@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { DnsRecord } from "./dns-record.js";
-import { formatZone } from "./printer.js";
+import { formatZone, formatZoneJson } from "./printer.js";
 
 test("formats no records as an empty string", () => {
   assert.equal(formatZone([]), "");
@@ -22,6 +22,20 @@ test("pads name, ttl, and type columns to the widest entry in the batch", () => 
     "",
   ];
   assert.deepEqual(formatZone(records).split("\n"), expected);
+});
+
+test("formats no records as JSON as an empty array", () => {
+  assert.equal(formatZoneJson([]), "[]\n");
+});
+
+test("formats records as a pretty-printed JSON array, in order, with a trailing newline", () => {
+  const records: DnsRecord[] = [
+    { name: "example.com.", ttl: 300, class: "IN", type: "A", address: "192.0.2.1" },
+    { name: "example.com.", ttl: 300, class: "IN", type: "MX", preference: 10, exchange: "mail.example.com." },
+  ];
+  const output = formatZoneJson(records);
+  assert.equal(output.endsWith("\n"), true);
+  assert.deepEqual(JSON.parse(output), records);
 });
 
 test("re-quotes TXT rdata and escapes embedded quotes and backslashes", () => {

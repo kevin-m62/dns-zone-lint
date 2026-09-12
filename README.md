@@ -115,6 +115,22 @@ $ echo 'example.com. 3600 IN A 999.0.2.10' | node dist/cli.js
 line 1: invalid IPv4 address "999.0.2.10"
 ```
 
+Pass `--json` to get the parsed records as a JSON array instead of the
+aligned text table:
+
+```
+$ echo 'example.com. 3600 IN A 192.0.2.10' | node dist/cli.js --json
+[
+  {
+    "name": "example.com.",
+    "ttl": 3600,
+    "class": "IN",
+    "type": "A",
+    "address": "192.0.2.10"
+  }
+]
+```
+
 ## Library use
 
 The parser and printer are also usable directly:
@@ -130,6 +146,6 @@ process.stdout.write(formatZone(records));
 ## Status
 
 Early skeleton. See the record types listed above for what's covered so
-far — only class `IN` is recognized, there's no `--json` or `--check`
-output mode yet, and IPv6 validation doesn't cover embedded IPv4 tails or
-zone indices.
+far — only class `IN` is recognized, there's no `--check` output mode
+yet, and IPv6 validation doesn't cover embedded IPv4 tails or zone
+indices.

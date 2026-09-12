@@ -4,7 +4,7 @@ import {
   DnsParseError,
   parseZone,
 } from "./dns-record.js";
-import { formatZone } from "./printer.js";
+import { formatZone, formatZoneJson } from "./printer.js";
 
 // With no file arguments, read the zone data from stdin (fd 0). This lets
 // the tool sit in a pipeline, e.g. `dig +nocmd example.com AXFR | dns-zone-lint`.
@@ -16,7 +16,9 @@ function readInput(paths: string[]): string {
 }
 
 function main(): void {
-  const paths = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  const jsonOutput = args.includes("--json");
+  const paths = args.filter((arg) => arg !== "--json");
 
   let input: string;
   try {
@@ -29,7 +31,7 @@ function main(): void {
 
   try {
     const records = parseZone(input);
-    process.stdout.write(formatZone(records));
+    process.stdout.write(jsonOutput ? formatZoneJson(records) : formatZone(records));
   } catch (err) {
     if (err instanceof AggregateDnsParseError) {
       for (const e of err.errors) process.stderr.write(`${e.message}\n`);
